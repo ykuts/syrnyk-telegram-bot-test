@@ -60,9 +60,9 @@ async function handleNewUser(msg) {
         bot.sendMessage(userId, firstMessage, { parse_mode: 'HTML' });
 
         // Дополнительно отправляем PDF-файл (опционально)
-        const documentPath = './assets/Price_SYRNYK_Prix.pdf'; // Локальный путь к PDF-файлу
+        const documentPath = './assets/Prix.pdf'; // Локальный путь к PDF-файлу
         const fileOptions = {
-            filename: 'Price_SYRNYK_Prix.pdf',
+            filename: 'Prix.pdf',
             contentType: 'application/pdf' // Явно указываем тип содержимого
         };
         bot.sendDocument(userId, documentPath, {}, fileOptions)
@@ -130,9 +130,9 @@ bot.onText(/\/start/, async (msg) => {
     bot.sendMessage(userId, firstMessage, { parse_mode: 'HTML' });
 
     // Дополнительно отправляем PDF-файл (опционально)
-    const documentPath = './assets/Price_SYRNYK_Prix.pdf'; // Локальный путь к PDF-файлу
+    const documentPath = './assets/Prix.pdf'; // Локальный путь к PDF-файлу
     const fileOptions = {
-        filename: 'Price_SYRNYK_Prix.pdf',
+        filename: 'Prix.pdf',
         contentType: 'application/pdf' // Явно указываем тип содержимого
     };
     bot.sendDocument(userId, documentPath, {}, fileOptions)
