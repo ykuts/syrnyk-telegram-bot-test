@@ -122,7 +122,7 @@ bot.onText(/\/myid/, (msg) => {
     bot.sendMessage(msg.chat.id, `Ваш Telegram ID: ${msg.from.id}`);
 });
 
-// Обработчик команды /start
+/* // Обработчик команды /start
 bot.onText(/\/start/, async (msg) => {
     const userId = msg.from.id;
 
@@ -141,7 +141,7 @@ bot.onText(/\/start/, async (msg) => {
         });
 
     
-});
+}); */
 
 // Обработчик всех входящих сообщений
 bot.on('message', async (msg) => {
