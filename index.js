@@ -2,15 +2,15 @@ const { Pool } = require('pg');
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 
-// Токен бота из переменных окружения
+// Bot token from environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Приветственное сообщение
+// Welcome message
 const firstMessage = `
 Шановні друзі!
 
-Вітаю всіх, хто приєднався до мого чат-бота “SYRNYK”! 🎉
+Вітаю всіх, хто приєднався до мого чат-бота "SYRNYK"! 🎉
 Тут я буду надсилати важливу інформацію про:
 🔔 оновлення цін
 🛒 асортимент
@@ -23,12 +23,12 @@ const firstMessage = `
 Ваша сировар, Ірина.
 `;
 
-// Подключение к базе данных PostgreSQL
+// PostgreSQL database connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 
-// Функция для выполнения SQL-запросов
+// Function to execute SQL queries
 async function queryDB(query, values = []) {
     const client = await pool.connect();
     try {
@@ -39,117 +39,125 @@ async function queryDB(query, values = []) {
     }
 }
 
-// Функция для обработки нового пользователя
+// Function to handle new users
 async function handleNewUser(msg) {
     const userId = msg.from.id;
     const firstName = msg.from.first_name;
     const lastName = msg.from.last_name || '';
     const username = msg.from.username || '';
 
-    // Проверяем, есть ли пользователь уже в базе данных
+    // Check if user already exists in database
     const result = await queryDB('SELECT * FROM users WHERE user_id = $1', [userId]);
 
-    // Если пользователя нет в базе, добавляем его и отправляем приветственное сообщение
+    // If user doesn't exist, add them and send welcome message
     if (result.rows.length === 0) {
         await queryDB(
             'INSERT INTO users (user_id, first_name, last_name, username, welcome_message_sent) VALUES ($1, $2, $3, $4, FALSE)',
             [userId, firstName, lastName, username]
         );
 
-        // Отправляем приветственное сообщение
+        // Send welcome message
         bot.sendMessage(userId, firstMessage, { parse_mode: 'HTML' });
 
-        // Дополнительно отправляем PDF-файл (опционально)
-        const documentPath = './assets/Prix.pdf'; // Локальный путь к PDF-файлу
+        // Optionally send PDF file
+        const documentPath = './assets/Prix.pdf';
         const fileOptions = {
             filename: 'Prix.pdf',
-            contentType: 'application/pdf' // Явно указываем тип содержимого
+            contentType: 'application/pdf'
         };
         bot.sendDocument(userId, documentPath, {}, fileOptions)
             .catch((error) => {
-                console.log(`Не удалось отправить PDF-файл пользователю ${userId}:`, error);
+                console.log(`Failed to send PDF file to user ${userId}:`, error);
             });
-        // Обновляем поле `welcome_message_sent`
+        
+        // Update welcome_message_sent status
         await queryDB(
             'UPDATE users SET welcome_message_sent = TRUE WHERE user_id = $1',
             [userId]
         );
-    
     }
 }
 
-// Функция для сохранения сообщений пользователей
+// Function to save user messages to database
 async function saveUserMessage(msg) {
     const userId = msg.from.id;
     const messageId = msg.message_id;
     const text = msg.text || '';
 
-    // Сохраняем сообщение в базу данных с датой и временем
+    // Save message to database with timestamp
     await queryDB(
         'INSERT INTO messages (user_id, message_id, text, date) VALUES ($1, $2, $3, NOW())',
         [userId, messageId, text]
     );
 }
 
-// Команда для рассылки сообщения всем подписчикам
+// Function to forward messages to admin
+async function forwardToAdmin(msg) {
+    const adminIds = process.env.ADMIN_IDS.split(',').map(id => parseInt(id, 10));
+    const userName = msg.from.username ? `@${msg.from.username}` : 'No username';
+    const userFullName = `${msg.from.first_name} ${msg.from.last_name || ''}`.trim();
+    
+    const forwardMessage = `
+📩 New message from user:
+👤 Name: ${userFullName}
+🆔 ID: ${msg.from.id}
+📱 Username: ${userName}
+📝 Text: ${msg.text}
+`;
+
+    // Send message to each admin
+    for (const adminId of adminIds) {
+        try {
+            await bot.sendMessage(adminId, forwardMessage);
+            
+            // If message contains media files, forward them as well
+            if (msg.photo || msg.video || msg.document || msg.voice || msg.audio) {
+                await bot.forwardMessage(adminId, msg.chat.id, msg.message_id);
+            }
+        } catch (error) {
+            console.error(`Error forwarding message to admin ${adminId}:`, error);
+        }
+    }
+}
+
+// Command to broadcast message to all subscribers
 bot.onText(/\/broadcast (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const broadcastMessage = match[1];
 
-    // Проверка на администратора
+    // Check if sender is admin
     const adminIds = process.env.ADMIN_IDS.split(',').map(id => parseInt(id, 10));
     if (!adminIds.includes(msg.from.id)) {
-        return bot.sendMessage(chatId, 'У вас нет прав для выполнения этой команды.');
+        return bot.sendMessage(chatId, 'You do not have permission to use this command.');
     }
 
-    // Получаем всех пользователей из базы данных
+    // Get all users from database
     const result = await queryDB('SELECT user_id FROM users');
     const users = result.rows;
 
-    // Отправляем сообщение каждому пользователю
+    // Send message to each user
     users.forEach(user => {
         bot.sendMessage(user.user_id, broadcastMessage)
             .catch((error) => {
-                console.log(`Не удалось отправить сообщение пользователю ${user.user_id}:`, error);
+                console.log(`Failed to send message to user ${user.user_id}:`, error);
             });
     });
 
-    bot.sendMessage(chatId, 'Повідомлення надіслане всім підписникам!');
+    bot.sendMessage(chatId, 'Message has been sent to all subscribers!');
 });
 
-// Команда для получения ID пользователя
+// Command to get user's Telegram ID
 bot.onText(/\/myid/, (msg) => {
-    bot.sendMessage(msg.chat.id, `Ваш Telegram ID: ${msg.from.id}`);
+    bot.sendMessage(msg.chat.id, `Your Telegram ID: ${msg.from.id}`);
 });
 
-/* // Обработчик команды /start
-bot.onText(/\/start/, async (msg) => {
-    const userId = msg.from.id;
-
-    // Отправляем приветственное сообщение
-    bot.sendMessage(userId, firstMessage, { parse_mode: 'HTML' });
-
-    // Дополнительно отправляем PDF-файл (опционально)
-    const documentPath = './assets/Prix.pdf'; // Локальный путь к PDF-файлу
-    const fileOptions = {
-        filename: 'Prix.pdf',
-        contentType: 'application/pdf' // Явно указываем тип содержимого
-    };
-    bot.sendDocument(userId, documentPath, {}, fileOptions)
-        .catch((error) => {
-            console.log(`Не удалось отправить PDF-файл пользователю ${userId}:`, error);
-        });
-
-    
-}); */
-
-// Обработчик всех входящих сообщений
+// Handler for all incoming messages
 bot.on('message', async (msg) => {
     const messageId = msg.message_id;
     const userId = msg.from.id;
 
     try {
-        // Проверяем, было ли уже обработано это сообщение
+        // Check if message was already processed
         const processedMessageQuery = `
             SELECT COUNT(*) 
             FROM messages 
@@ -158,34 +166,34 @@ bot.on('message', async (msg) => {
         const result = await pool.query(processedMessageQuery, [messageId, userId]);
 
         if (result.rows[0].count > 0) {
-            return; // Пропускаем уже обработанное сообщение
+            return; // Skip already processed message
         }
 
-        // Проверяем, если это новое сообщение от пользователя
+        // Check if this is a new user
         await handleNewUser(msg);
 
-        // Если это не команда (например, /start), сохраняем сообщение и отправляем ответ
+        // If this is not a command, save message, forward to admin and send response
         if (msg.text && !msg.text.startsWith('/')) {
             await saveUserMessage(msg);
+            await forwardToAdmin(msg); // Forward message to admin
+            
             bot.sendMessage(msg.chat.id, `Вітаю! Дякую за повідомлення!
 
 Наразі цей бот не працює, будь ласка, для замовлень - пишіть в особисті повідомлення за номером 
 +41-79-715-87-74 ✅
 
-З повагою, 
-Команда SYRNYK`);
+З повагою, 
+Команда SYRNYK`);
         }
     } catch (error) {
-        console.error('Ошибка при обработке сообщения:', error);
+        console.error('Error processing message:', error);
     }
 });
 
-
-// Обработчик ошибок polling
+// Polling error handler
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error);
 
-    // Проверяем, есть ли объект error.response и его свойства
     if (error.response && error.response.body) {
         console.log('Error details:', error.response.body);
     } else {
